@@ -1,0 +1,91 @@
+# docker compose file for running a 3-node PostgreSQL cluster
+# with 3-node etcd cluster as the DCS and one haproxy node
+#
+# requires a patroni image build from the Dockerfile:
+# $ docker build -t patroni .
+# The cluster could be started as:
+# $ docker-compose up -d
+# You can read more about it in the:
+# https://github.com/zalando/patroni/blob/master/docker/README.md
+version: "2"
+
+networks:
+    demo:
+
+services:
+    etcd1: &etcd
+        image: patroni
+        networks: [ demo ]
+        environment:
+            ETCD_LISTEN_PEER_URLS: http://0.0.0.0:2380
+            ETCD_LISTEN_CLIENT_URLS: http://0.0.0.0:2379
+            ETCD_INITIAL_CLUSTER: etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380
+            ETCD_INITIAL_CLUSTER_STATE: new
+            ETCD_INITIAL_CLUSTER_TOKEN: tutorial
+            ETCD_UNSUPPORTED_ARCH: arm64
+        container_name: poly-etcd1
+        hostname: etcd1
+        command: etcd --name etcd1 --initial-advertise-peer-urls http://etcd1:2380
+
+    etcd2:
+        <<: *etcd
+        container_name: poly-etcd2
+        hostname: etcd2
+        command: etcd --name etcd2 --initial-advertise-peer-urls http://etcd2:2380
+
+    etcd3:
+        <<: *etcd
+        container_name: poly-etcd3
+        hostname: etcd3
+        command: etcd --name etcd3 --initial-advertise-peer-urls http://etcd3:2380
+
+    haproxy:
+        image: patroni
+        networks: [ demo ]
+        env_file: patroni.env
+        hostname: haproxy
+        container_name: poly-haproxy
+        ports:
+            - "5500:5000"
+            - "5501:5001"
+        command: haproxy
+        environment: &haproxy_env
+            ETCDCTL_ENDPOINTS: http://etcd1:2379,http://etcd2:2379,http://etcd3:2379
+            PATRONI_ETCD3_HOSTS: "'etcd1:2379','etcd2:2379','etcd3:2379'"
+            PATRONI_SCOPE: production
+
+    patroni1:
+        image: patroni
+        networks: [ demo ]
+        env_file: patroni.env
+        hostname: polygon1
+        container_name: poly-patroni1
+        environment:
+            <<: *haproxy_env
+            PATRONI_NAME: patroni1
+        volumes:
+          - ${PWD}/data1:/home/postgres/data
+
+    patroni2:
+        image: patroni
+        networks: [ demo ]
+        env_file: patroni.env
+        hostname: polygon2
+        container_name: poly-patroni2
+        environment:
+            <<: *haproxy_env
+            PATRONI_NAME: patroni2
+        volumes:
+          - ${PWD}/data2:/home/postgres/data
+
+    patroni3:
+        image: patroni
+        networks: [ demo ]
+        env_file: patroni.env
+        hostname: polygon3
+        container_name: poly-patroni3
+        environment:
+            <<: *haproxy_env
+            PATRONI_NAME: patroni3
+        volumes:
+          - ${PWD}/data3:/home/postgres/data
